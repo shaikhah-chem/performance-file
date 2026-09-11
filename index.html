@@ -342,6 +342,15 @@ footer{background:var(--maroon-deep);color:#f3e0eb;padding:44px 0 26px;margin-to
   .toolbar{position:static;}
   .cv-hero{flex-direction:column;text-align:center;}
 }
+
+/* وضع العرض فقط: يُفعَّل عبر رابط ينتهي بـ ?view=1، ويُخفي كل أدوات التحرير */
+body.view-only .edit-only{display:none !important;}
+#viewOnlyBanner{
+  display:none;position:fixed;top:var(--nav-h);inset-inline:0;z-index:850;background:var(--gold);
+  color:#3a2200;text-align:center;padding:8px 14px;font-size:.85rem;font-weight:700;
+}
+body.view-only #viewOnlyBanner{display:block;}
+body.view-only .hero{padding-top:calc(var(--nav-h) + 40px + 34px);}
 </style>
 </head>
 <body>
@@ -360,6 +369,7 @@ footer{background:var(--maroon-deep);color:#f3e0eb;padding:44px 0 26px;margin-to
     </div>
   </div>
 </nav>
+<div id="viewOnlyBanner">👁️ وضع العرض فقط — هذا رابط مخصص للمراجعة، أدوات الإضافة والتعديل والحذف غير ظاهرة هنا</div>
 
 <!-- القائمة الجانبية للهاتف -->
 <div class="mobile-menu" id="mobileMenu">
@@ -403,7 +413,7 @@ footer{background:var(--maroon-deep);color:#f3e0eb;padding:44px 0 26px;margin-to
         <span class="page-head eyebrow" style="color:var(--pink-dark);font-weight:700;font-size:.85rem;">نظرة سريعة</span>
         <h2 style="font-family:var(--font-display);color:var(--maroon);font-size:1.9rem;">مكوّنات الملف</h2>
       </div>
-      <button class="toolbar-btn" onclick="exportWithAttachments()">📦 تصدير الملف مع المرفقات لإرساله</button>
+      <button class="toolbar-btn edit-only" onclick="exportWithAttachments()">📦 تصدير الملف مع المرفقات والبيانات</button>
     </div>
     <div class="grid-cards reveal" id="homeIntroCards"></div>
 
@@ -429,7 +439,8 @@ footer{background:var(--maroon-deep);color:#f3e0eb;padding:44px 0 26px;margin-to
       <a href="#" onclick="goPage('cv');return false;">السيرة الذاتية</a>
       <a href="#" onclick="window.print();return false;">🖨️ طباعة</a>
       <a href="#" onclick="exportSummaryPDF();return false;">📄 تصدير ملخص PDF</a>
-      <a href="#" onclick="exportWithAttachments();return false;">📦 تصدير الملف مع المرفقات</a>
+      <a href="#" class="edit-only" onclick="exportWithAttachments();return false;">📦 تصدير الملف مع المرفقات والبيانات</a>
+      <a href="#" class="edit-only" onclick="copyViewOnlyLink();return false;">🔗 نسخ رابط عرض فقط (للمديرة)</a>
     </div>
   </div>
   <div class="container footer-bottom" id="footerCopy">جميع الحقوق محفوظة © 1447هـ — المعلمة / [اسم المعلمة]</div>
@@ -466,23 +477,23 @@ footer{background:var(--maroon-deep);color:#f3e0eb;padding:44px 0 26px;margin-to
    "[أضيفي الرابط هنا]".
    ========================================================================== */
 
-const TEACHER = {
-  name: "[اسم المعلمة]",
-  specialization: "[التخصص]",
-  subject: "[اسم المادة]",
-  school: "[اسم المدرسة]",
-  eduAdmin: "[الإدارة التعليمية]",
-  year: "1447هـ",
+const TEACHER_DEFAULTS = {
+  name: "شيخة المطيري",
+  specialization: "كيمياء",
+  subject: "كيمياء",
+  school: "الثانوية الثانية و الثلاثون",
+  eduAdmin: "ادارة تعليم القصيم",
+  year: "1448هـ",
   semesterLabel: "الأول والثاني",
-  copyrightName: "[اسم المعلمة]",
+  copyrightName: "شيخة المطيري",
   cv: {
     photo: "",
-    qualification: "[أدخلي المؤهل العلمي]",
-    experienceYears: "[عدد سنوات الخبرة]",
-    courses: ["[دورة تدريبية 1]", "[دورة تدريبية 2]", "[دورة تدريبية 3]"],
-    licenses: ["[الرخصة المهنية للمعلمين]"],
-    skills: ["[مهارة تقنية 1]", "[مهارة تعليمية 2]", "[مهارة 3]"],
-    achievements: ["[إنجاز أو خبرة 1]", "[إنجاز أو خبرة 2]"],
+    qualification: "بكالريوس كيمياء",
+    experienceYears: "16",
+    courses: ["3 دورة تدريب المدربين", "دورة تطبيقات الذكاء الاصطناعي", "دورات تدريبية"],
+    licenses: ["الرخصة المهنية للمعلمين"],
+    skills: ["مهارة تقنية 1", "مهارة تعليمية 2", "مهارة 3"],
+    achievements: ["إنجاز أو خبرة 1", "إنجاز أو خبرة 2"],
     social: [
       { label: "البريد المهني", url: "" },
       { label: "منصة مدرستي", url: "" },
@@ -490,6 +501,10 @@ const TEACHER = {
     ]
   }
 };
+/* TEACHER هو الكائن الفعلي المستخدم في كل الموقع؛ يبدأ بنسخة من القيم
+   الافتراضية أعلاه، ثم تُدمَج عليه أي تعديلات محفوظة (مضمّنة في الملف
+   أو محفوظة في متصفحك) عبر applyTeacherOverrides() عند بدء التشغيل. */
+const TEACHER = JSON.parse(JSON.stringify(TEACHER_DEFAULTS));
 
 /* الصفحات التمهيدية */
 const INTRO_PAGES = [
@@ -533,7 +548,7 @@ const INTRO_PAGES = [
 ];
 
 /* معايير الأداء الوظيفي وشواهدها — كل معيار يحتوي فصلين دراسيين وقائمة فرعية */
-const CRITERIA = [
+const CRITERIA_DEFAULTS = [
   { id:"c1", icon:"🗂️", title:"أداء الواجبات الوظيفية",
     desc:"توثيق تنفيذ الواجبات الوظيفية اليومية من جداول وحصص ومناسبات.",
     subs:["جدول الحصص","تفعيل المناسبات الوطنية والعالمية","تفعيل حصص الانتظار","خطة توزيع المنهج"] },
@@ -569,10 +584,16 @@ const CRITERIA = [
     subs:["نماذج الاختبارات الورقية","نماذج الاختبارات الإلكترونية","المهام الأدائية","أوراق العمل","المشاريع التعليمية","ملفات إنجاز الطالبات","التقويم القبلي","التقويم التكويني","التقويم الختامي","تقويم الأقران والتقويم الذاتي"] }
 ];
 
-/* توليد بيانات الشواهد تلقائيًا لكل معيار × فصل دراسي × عنصر فرعي */
-const EVID_TYPES = ["PDF","Word","PowerPoint","صورة","فيديو","رابط"];
-function buildEvidenceData(){
-  CRITERIA.forEach(c=>{
+/* توليد معرّف فريد للعناصر الجديدة (معيار/شاهد) التي تُضاف من واجهة الموقع */
+function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+
+/* توليد نسخة "أصلية" كاملة من بيانات المعايير مع شواهدها الافتراضية.
+   معرّفات الشواهد الافتراضية (c1_s1_0 ...) تبقى ثابتة دائمًا حتى لا
+   تنقطع صلتها بأي ملفات مرفَقة سابقًا. */
+const EVID_TYPES = ["PDF","Word","PowerPoint","Excel","صورة","فيديو","رابط"];
+function freshCriteriaData(){
+  const arr = JSON.parse(JSON.stringify(CRITERIA_DEFAULTS));
+  arr.forEach(c=>{
     c.semesters = { 1: [], 2: [] };
     [1,2].forEach(sem=>{
       c.subs.forEach((subName,i)=>{
@@ -589,8 +610,39 @@ function buildEvidenceData(){
       });
     });
   });
+  return arr;
 }
-buildEvidenceData();
+
+/* CRITERIA هو المصفوفة الحيّة المستخدمة في كل الموقع؛ تبقى نفس المرجع
+   (const) وتُملأ/تُستبدل محتوياتها فقط عبر push/splice حتى لا تنكسر أي
+   دالة تحتفظ بمرجع لها. */
+const CRITERIA = [];
+CRITERIA.push(...freshCriteriaData());
+
+const CRITERIA_OVERRIDE_KEY = "portfolioCriteriaOverride";
+function applyCriteriaOverrides(){
+  let snapshot = null;
+  const embTag = document.getElementById("embeddedCriteria");
+  if(embTag){ try{ snapshot = JSON.parse(embTag.textContent); } catch(err){ console.warn("تعذّرت قراءة المعايير المضمّنة:", err); } }
+  try{
+    const local = localStorage.getItem(CRITERIA_OVERRIDE_KEY);
+    if(local) snapshot = JSON.parse(local);
+  } catch(err){ console.warn("تعذّرت قراءة تعديلات المعايير المحفوظة محليًا:", err); }
+  if(snapshot && Array.isArray(snapshot) && snapshot.length){
+    CRITERIA.length = 0;
+    CRITERIA.push(...snapshot);
+  }
+}
+function saveCriteriaSnapshot(){
+  try{ localStorage.setItem(CRITERIA_OVERRIDE_KEY, JSON.stringify(CRITERIA)); }
+  catch(err){ console.warn("تعذّر حفظ تعديلات المعايير:", err); }
+}
+function refreshAfterCriteriaChange(targetId){
+  buildNav();
+  buildHomeCards();
+  renderStaticPages();
+  goPage(targetId || (location.hash.replace("#","")||"home"));
+}
 
 /* ==========================================================================
    طبقة إرفاق الملفات (IndexedDB) — تتيح رفع الملفات الفعلية وحفظها
@@ -606,7 +658,10 @@ let dbPromise = null;
 function openDB(){
   if(dbPromise) return dbPromise;
   dbPromise = new Promise((resolve,reject)=>{
-    const req = indexedDB.open(DB_NAME, 1);
+    if(!window.indexedDB){ reject(new Error("متصفحك أو إعدادات هذا الجهاز تمنع تخزين الملفات محليًا (IndexedDB غير متاح).")); return; }
+    let req;
+    try{ req = indexedDB.open(DB_NAME, 1); }
+    catch(err){ reject(err); return; }
     req.onupgradeneeded = e=>{
       const db = e.target.result;
       if(!db.objectStoreNames.contains(STORE_NAME)){
@@ -615,13 +670,131 @@ function openDB(){
       }
     };
     req.onsuccess = e=> resolve(e.target.result);
-    req.onerror = ()=> reject(req.error);
+    req.onerror = ()=> reject(req.error || new Error("تعذّر فتح قاعدة بيانات الملفات المحلية."));
+    req.onblocked = ()=> reject(new Error("تخزين الملفات محجوب (blocked) — أغلقي أي تبويب آخر مفتوح لنفس الموقع وحاولي مجددًا."));
   });
   return dbPromise;
 }
 
 let ATTACH_CACHE = {};  /* evidId -> [{fileId,name,type,size}] لعرض القوائم */
 let ATTACH_INDEX = {};  /* fileId -> السجل الكامل (idb أو embedded) لتنفيذ المعاينة/التنزيل/الحذف */
+
+/* ==========================================================================
+   لوحة «تعديل البيانات» — تتيح تعديل بيانات المعلمة والسيرة الذاتية من
+   داخل الموقع مباشرة (بدون لمس الكود). التعديلات تُحفظ في متصفح الجهاز
+   فوريًا، وتصبح دائمة وتظهر لأي شخص عند استخدام زر «تصدير الملف مع
+   المرفقات والبيانات».
+   ========================================================================== */
+const TEACHER_OVERRIDE_KEY = "portfolioTeacherOverride";
+
+function deepMergeTeacher(base, patch){
+  if(!patch) return base;
+  const out = JSON.parse(JSON.stringify(base));
+  Object.keys(patch).forEach(k=>{
+    if(k==="cv" && patch.cv){
+      out.cv = Object.assign({}, out.cv, patch.cv);
+    } else if(patch[k] !== undefined){
+      out[k] = patch[k];
+    }
+  });
+  return out;
+}
+
+function applyTeacherOverrides(){
+  let merged = TEACHER_DEFAULTS;
+  const embTag = document.getElementById("embeddedTeacher");
+  if(embTag){
+    try{ merged = deepMergeTeacher(merged, JSON.parse(embTag.textContent)); }
+    catch(err){ console.warn("تعذّرت قراءة بيانات المعلمة المضمّنة:", err); }
+  }
+  try{
+    const local = localStorage.getItem(TEACHER_OVERRIDE_KEY);
+    if(local) merged = deepMergeTeacher(merged, JSON.parse(local));
+  } catch(err){ console.warn("تعذّرت قراءة التعديلات المحفوظة محليًا:", err); }
+  Object.assign(TEACHER, merged);
+}
+
+function saveTeacherOverride(patch){
+  try{
+    const existingRaw = localStorage.getItem(TEACHER_OVERRIDE_KEY);
+    const existing = existingRaw ? JSON.parse(existingRaw) : {};
+    const merged = deepMergeTeacher(Object.assign({}, TEACHER_DEFAULTS, existing), patch);
+    localStorage.setItem(TEACHER_OVERRIDE_KEY, JSON.stringify(merged));
+  } catch(err){ console.warn("تعذّر حفظ التعديلات:", err); }
+  Object.assign(TEACHER, deepMergeTeacher(TEACHER, patch));
+}
+
+function linesToArray(text){
+  return (text||"").split("\n").map(s=>s.trim()).filter(Boolean);
+}
+
+function openSettingsPanel(){
+  const cv = TEACHER.cv;
+  document.getElementById("evidModalContent").innerHTML = `
+    <h3 style="color:var(--maroon);font-family:var(--font-display);margin-bottom:18px;">⚙️ تعديل بيانات الملف</h3>
+    <form id="settingsForm" style="display:flex;flex-direction:column;gap:14px;text-align:right;">
+      <div><label style="font-weight:700;font-size:.85rem;">اسم المعلمة</label>
+        <input name="name" value="${esc(TEACHER.name)}" style="width:100%;padding:9px 12px;border-radius:9px;border:1px solid var(--card-border);font-family:inherit;margin-top:4px;"></div>
+      <div><label style="font-weight:700;font-size:.85rem;">التخصص</label>
+        <input name="specialization" value="${esc(TEACHER.specialization)}" style="width:100%;padding:9px 12px;border-radius:9px;border:1px solid var(--card-border);font-family:inherit;margin-top:4px;"></div>
+      <div><label style="font-weight:700;font-size:.85rem;">اسم المادة</label>
+        <input name="subject" value="${esc(TEACHER.subject)}" style="width:100%;padding:9px 12px;border-radius:9px;border:1px solid var(--card-border);font-family:inherit;margin-top:4px;"></div>
+      <div><label style="font-weight:700;font-size:.85rem;">اسم المدرسة</label>
+        <input name="school" value="${esc(TEACHER.school)}" style="width:100%;padding:9px 12px;border-radius:9px;border:1px solid var(--card-border);font-family:inherit;margin-top:4px;"></div>
+      <div><label style="font-weight:700;font-size:.85rem;">الإدارة التعليمية</label>
+        <input name="eduAdmin" value="${esc(TEACHER.eduAdmin)}" style="width:100%;padding:9px 12px;border-radius:9px;border:1px solid var(--card-border);font-family:inherit;margin-top:4px;"></div>
+      <div><label style="font-weight:700;font-size:.85rem;">العام الدراسي</label>
+        <input name="year" value="${esc(TEACHER.year)}" style="width:100%;padding:9px 12px;border-radius:9px;border:1px solid var(--card-border);font-family:inherit;margin-top:4px;"></div>
+      <hr style="border:none;border-top:1px dashed var(--card-border);margin:6px 0;">
+      <h4 style="color:var(--maroon-deep);font-size:1rem;">السيرة الذاتية</h4>
+      <div><label style="font-weight:700;font-size:.85rem;">المؤهل العلمي</label>
+        <input name="qualification" value="${esc(cv.qualification)}" style="width:100%;padding:9px 12px;border-radius:9px;border:1px solid var(--card-border);font-family:inherit;margin-top:4px;"></div>
+      <div><label style="font-weight:700;font-size:.85rem;">سنوات الخبرة</label>
+        <input name="experienceYears" value="${esc(cv.experienceYears)}" style="width:100%;padding:9px 12px;border-radius:9px;border:1px solid var(--card-border);font-family:inherit;margin-top:4px;"></div>
+      <div><label style="font-weight:700;font-size:.85rem;">الدورات التدريبية <span style="font-weight:400;opacity:.6;">(كل دورة في سطر منفصل)</span></label>
+        <textarea name="courses" rows="3" style="width:100%;padding:9px 12px;border-radius:9px;border:1px solid var(--card-border);font-family:inherit;margin-top:4px;">${esc(cv.courses.join("\n"))}</textarea></div>
+      <div><label style="font-weight:700;font-size:.85rem;">الرخص المهنية <span style="font-weight:400;opacity:.6;">(كل رخصة في سطر)</span></label>
+        <textarea name="licenses" rows="2" style="width:100%;padding:9px 12px;border-radius:9px;border:1px solid var(--card-border);font-family:inherit;margin-top:4px;">${esc(cv.licenses.join("\n"))}</textarea></div>
+      <div><label style="font-weight:700;font-size:.85rem;">المهارات <span style="font-weight:400;opacity:.6;">(كل مهارة في سطر)</span></label>
+        <textarea name="skills" rows="3" style="width:100%;padding:9px 12px;border-radius:9px;border:1px solid var(--card-border);font-family:inherit;margin-top:4px;">${esc(cv.skills.join("\n"))}</textarea></div>
+      <div><label style="font-weight:700;font-size:.85rem;">الخبرات والإنجازات <span style="font-weight:400;opacity:.6;">(كل إنجاز في سطر)</span></label>
+        <textarea name="achievements" rows="3" style="width:100%;padding:9px 12px;border-radius:9px;border:1px solid var(--card-border);font-family:inherit;margin-top:4px;">${esc(cv.achievements.join("\n"))}</textarea></div>
+      <div style="display:grid;grid-template-columns:1fr 2fr;gap:8px;">
+        ${cv.social.map((s,i)=>`
+          <input name="socialLabel${i}" value="${esc(s.label)}" placeholder="اسم الوسيلة" style="padding:9px 12px;border-radius:9px;border:1px solid var(--card-border);font-family:inherit;">
+          <input name="socialUrl${i}" value="${esc(s.url)}" placeholder="الرابط" style="padding:9px 12px;border-radius:9px;border:1px solid var(--card-border);font-family:inherit;">
+        `).join("")}
+      </div>
+      <div class="storage-note">🔒 هذه التعديلات تُحفظ في متصفح هذا الجهاز فورًا. لجعلها دائمة وتظهر للجميع، استخدمي «📦 تصدير الملف» بعد الحفظ.</div>
+      <div class="evid-actions">
+        <button type="submit" class="evid-btn" style="background:var(--maroon);color:#fff;flex:2;">💾 حفظ التعديلات</button>
+        <button type="button" class="evid-btn" onclick="closeModal('evidModal')" style="flex:1;">إلغاء</button>
+      </div>
+    </form>`;
+  document.getElementById("settingsForm").addEventListener("submit", e=>{
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const social = TEACHER.cv.social.map((s,i)=>({label: fd.get(`socialLabel${i}`)||s.label, url: fd.get(`socialUrl${i}`)||""}));
+    const patch = {
+      name: fd.get("name"), specialization: fd.get("specialization"), subject: fd.get("subject"),
+      school: fd.get("school"), eduAdmin: fd.get("eduAdmin"), year: fd.get("year"), copyrightName: fd.get("name"),
+      cv: {
+        qualification: fd.get("qualification"), experienceYears: fd.get("experienceYears"),
+        courses: linesToArray(fd.get("courses")), licenses: linesToArray(fd.get("licenses")),
+        skills: linesToArray(fd.get("skills")), achievements: linesToArray(fd.get("achievements")),
+        social
+      }
+    };
+    saveTeacherOverride(patch);
+    closeModal("evidModal");
+    applyTeacherData();
+    buildHomeCards();
+    renderStaticPages();
+    const current = location.hash.replace("#","") || "home";
+    goPage(current);
+  });
+  openModal("evidModal");
+}
 
 /* يقرأ الملفات المضمَّنة مسبقًا داخل الملف نفسه (إن وُجدت) — تُضاف عند
    استخدام زر «تصدير الملف مع المرفقات» وتبقى ظاهرة لأي شخص يفتح الملف،
@@ -724,6 +897,7 @@ function fileIcon(type){
   if(type.includes("pdf")) return "📕";
   if(type.includes("word") || type.includes("msword") || type.includes("officedocument.wordprocessing")) return "📘";
   if(type.includes("presentation") || type.includes("powerpoint")) return "📙";
+  if(type.includes("sheet") || type.includes("excel") || type.includes("csv")) return "📊";
   if(type.startsWith("image/")) return "🖼️";
   if(type.startsWith("video/")) return "🎬";
   return "📎";
@@ -731,10 +905,18 @@ function fileIcon(type){
 
 async function handleFileUpload(evidId, inputEl, cid){
   const files = Array.from(inputEl.files || []);
-  for(const f of files){ await addAttachment(evidId, f); }
+  let successCount = 0;
+  for(const f of files){
+    try{
+      await addAttachment(evidId, f);
+      successCount++;
+    } catch(err){
+      console.error("فشل رفع الملف:", f.name, err);
+      alert(`تعذّر رفع الملف "${f.name}".\nرسالة الخطأ: ${(err && (err.message || err.name)) || err}\n\nقد يكون المتصفح يمنع حفظ الملفات محليًا على هذا الجهاز (سياسة إدارية أو إعدادات خصوصية). جرّبي متصفحًا آخر أو أرسلي رسالة الخطأ هذه.`);
+    }
+  }
   inputEl.value = "";
-  renderSemesterContent(cid);
-  buildHomeCards();
+  if(successCount>0){ renderSemesterContent(cid); buildHomeCards(); }
 }
 
 async function downloadAttachment(fileId){
@@ -786,7 +968,6 @@ function blobToDataUrl(blob){
 
 async function exportWithAttachments(){
   const evidIds = Object.keys(ATTACH_CACHE).filter(k=>ATTACH_CACHE[k].length>0);
-  if(evidIds.length===0){ alert("لا توجد ملفات مرفقة حاليًا لتضمينها. أرفقي الشواهد أولًا ثم استخدمي هذا الزر."); return; }
 
   const embedded = {};
   let totalBytes = 0;
@@ -818,8 +999,12 @@ async function exportWithAttachments(){
 
   /* إزالة أي بيانات مضمّنة سابقة لتفادي التكرار عند إعادة التصدير */
   sourceHtml = sourceHtml.replace(/<script id="embeddedData"[\s\S]*?<\/script>\s*/,"");
+  sourceHtml = sourceHtml.replace(/<script id="embeddedTeacher"[\s\S]*?<\/script>\s*/,"");
+  sourceHtml = sourceHtml.replace(/<script id="embeddedCriteria"[\s\S]*?<\/script>\s*/,"");
   const embeddedScript = `<script id="embeddedData" type="application/json">${JSON.stringify(embedded)}<\/script>\n`;
-  sourceHtml = sourceHtml.replace("</body>", embeddedScript + "</body>");
+  const teacherScript = `<script id="embeddedTeacher" type="application/json">${JSON.stringify(TEACHER)}<\/script>\n`;
+  const criteriaScript = `<script id="embeddedCriteria" type="application/json">${JSON.stringify(CRITERIA)}<\/script>\n`;
+  sourceHtml = sourceHtml.replace("</body>", embeddedScript + teacherScript + criteriaScript + "</body>");
 
   const blob = new Blob([sourceHtml], {type:"text/html;charset=utf-8"});
   const url = URL.createObjectURL(blob);
@@ -859,7 +1044,8 @@ function buildNav(){
     <li class="has-dropdown">
       <a href="#" class="nav-btn">معايير الأداء <span class="caret">▾</span></a>
       <ul class="dropdown">${critLis}</ul>
-    </li>`;
+    </li>
+    <li class="edit-only"><button class="icon-btn" onclick="openSettingsPanel()" title="تعديل البيانات" aria-label="تعديل البيانات">⚙️</button></li>`;
   document.getElementById("navLinksDesktop").innerHTML = desktop;
 
   const mobile = `
@@ -871,7 +1057,8 @@ function buildNav(){
     </details>
     <details><summary>معايير الأداء <span>▾</span></summary>
       ${CRITERIA.map(c=>`<a href="#" onclick="goPage('${c.id}');closeMobileMenu();return false;">${c.icon} ${esc(c.title)}</a>`).join("")}
-    </details>`;
+    </details>
+    <a href="#" class="edit-only" onclick="openSettingsPanel();closeMobileMenu();return false;">⚙️ تعديل البيانات</a>`;
   document.getElementById("mobileMenuContent").innerHTML = mobile;
 }
 
@@ -898,7 +1085,13 @@ function buildHomeCards(){
 
 function countFilled(c){
   let n=0;
-  [1,2].forEach(s=>c.semesters[s].forEach(e=>{ if(isFilled(e.fileUrl)||isFilled(e.linkUrl)||hasAttachments(e.id)) n++; }));
+  [1,2].forEach(s=>{
+    c.subs.forEach(subName=>{
+      const items = (c.semesters[s]||[]).filter(e=>e.sub===subName);
+      const covered = items.some(e=>isFilled(e.fileUrl)||isFilled(e.linkUrl)||hasAttachments(e.id));
+      if(covered) n++;
+    });
+  });
   return n;
 }
 function countTotalFilled(){
@@ -920,7 +1113,9 @@ function renderStaticPages(){
       ${INTRO_PAGES.map(p=>`<div class="info-card" onclick="goPage('${p.id}')"><span class="ic">${p.icon}</span><h4>${esc(p.title)}</h4></div>`).join("")}
       <div class="info-card" onclick="goPage('cv')"><span class="ic">👤</span><h4>السيرة الذاتية</h4></div>
     </div>
-    <div class="section-title-row"><h2 style="font-family:var(--font-display);color:var(--maroon);font-size:1.6rem;">معايير الأداء الوظيفي</h2></div>
+    <div class="section-title-row"><h2 style="font-family:var(--font-display);color:var(--maroon);font-size:1.6rem;">معايير الأداء الوظيفي</h2>
+      <button class="toolbar-btn edit-only" onclick="openCriterionForm('add')">➕ إضافة معيار جديد</button>
+    </div>
     <div class="grid-cards">
       ${CRITERIA.map((c,i)=>`<div class="info-card" onclick="goPage('${c.id}')"><span class="ic">${c.icon}</span><h4>${i+1}. ${esc(c.title)}</h4><p>${esc(c.desc)}</p></div>`).join("")}
     </div>
@@ -964,7 +1159,13 @@ function renderStaticPages(){
   CRITERIA.forEach(c=>{
     html += `<section class="page" id="page-${c.id}">
       <div class="breadcrumb"><a href="#" onclick="goPage('home');return false;">الرئيسية</a><span class="sep">/</span><a href="#" onclick="goPage('index');return false;">الفهرس</a><span class="sep">/</span><span class="current">${esc(c.title)}</span></div>
-      <div class="page-head"><span class="eyebrow">${c.icon} معيار أداء</span><h2>${esc(c.title)}</h2></div>
+      <div class="page-head" style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:12px;">
+        <div><span class="eyebrow">${c.icon} معيار أداء</span><h2>${esc(c.title)}</h2></div>
+        <div style="display:flex;gap:8px;">
+          <button class="toolbar-btn edit-only" onclick="openCriterionForm('edit','${c.id}')">✏️ تعديل المعيار</button>
+          <button class="toolbar-btn edit-only" onclick="deleteCriterion('${c.id}')" style="background:rgba(163,51,51,.1);color:#a33;">🗑️ حذف المعيار</button>
+        </div>
+      </div>
 
       <div class="crit-intro">
         <div class="crit-desc-box"><p>${esc(c.desc)}</p></div>
@@ -980,6 +1181,7 @@ function renderStaticPages(){
           <option value="">كل الأنواع</option>
           ${EVID_TYPES.map(t=>`<option value="${t}">${t}</option>`).join("")}
         </select>
+        <button class="toolbar-btn edit-only" onclick="addIndicator('${c.id}')">➕ إضافة مؤشر</button>
         <button class="toolbar-btn" onclick="window.print()">🖨️ طباعة</button>
         <div class="search-results-note" id="note-${c.id}"></div>
       </div>
@@ -1010,31 +1212,41 @@ function renderSemesterContent(cid){
   const sem = activeSemester[cid] || 1;
   const searchVal = (document.getElementById(`search-${cid}`)?.value || "").trim().toLowerCase();
   const typeVal = document.getElementById(`typeFilter-${cid}`)?.value || "";
+  const filtering = !!(searchVal || typeVal);
 
   let visibleCount = 0;
-  const bySub = {};
-  c.semesters[sem].forEach(ev=>{
-    const matchesSearch = !searchVal || ev.title.toLowerCase().includes(searchVal) || ev.sub.toLowerCase().includes(searchVal);
-    const matchesType = !typeVal || ev.type === typeVal;
-    if(!matchesSearch || !matchesType) return;
-    visibleCount++;
-    (bySub[ev.sub] = bySub[ev.sub] || []).push(ev);
-  });
-
   let html = "";
-  if(Object.keys(bySub).length === 0){
-    html = `<p style="opacity:.65;padding:30px 0;">لا توجد نتائج مطابقة لبحثك ضمن هذا الفصل الدراسي.</p>`;
-  } else {
-    Object.entries(bySub).forEach(([subName, list])=>{
-      html += `<div class="subcat-block">
-        <div class="subcat-head"><h4>${esc(subName)}</h4><span class="subcat-count">${list.length} شاهد</span></div>
-        <div class="evid-grid">${list.map(ev=>evidCardHTML(ev, cid)).join("")}</div>
-      </div>`;
+  if(c.subs.length === 0){
+    html = `<p style="opacity:.65;padding:30px 0;">لا توجد مؤشرات في هذا المعيار بعد. استخدمي زر «➕ إضافة مؤشر» أعلى الصفحة.</p>`;
+  }
+  c.subs.forEach(subName=>{
+    const allItems = c.semesters[sem].filter(e=>e.sub===subName);
+    const list = allItems.filter(ev=>{
+      const matchesSearch = !searchVal || ev.title.toLowerCase().includes(searchVal) || ev.sub.toLowerCase().includes(searchVal);
+      const matchesType = !typeVal || ev.type === typeVal;
+      return matchesSearch && matchesType;
     });
+    visibleCount += list.length;
+    if(filtering && list.length===0) return; /* إخفاء المؤشر بالكامل أثناء البحث إن لم يطابق */
+    html += `<div class="subcat-block">
+      <div class="subcat-head">
+        <h4>${esc(subName)}</h4>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span class="subcat-count">${list.length} شاهد</span>
+          <button class="a-btn edit-only" title="إعادة تسمية المؤشر" onclick="renameIndicator('${cid}','${esc(subName).replace(/'/g,"\\'")}')">✏️</button>
+          <button class="a-btn edit-only" title="حذف المؤشر" onclick="deleteIndicator('${cid}','${esc(subName).replace(/'/g,"\\'")}')">🗑️</button>
+        </div>
+      </div>
+      ${list.length ? `<div class="evid-grid">${list.map(ev=>evidCardHTML(ev, cid)).join("")}</div>` : `<p style="opacity:.55;font-size:.85rem;padding:6px 0 14px;">لا توجد شواهد بعد في هذا المؤشر لهذا الفصل.</p>`}
+      <button class="upload-btn edit-only" style="margin-top:10px;" onclick="addEvidence('${cid}',${sem},'${esc(subName).replace(/'/g,"\\'")}')">➕ إضافة شاهد جديد</button>
+    </div>`;
+  });
+  if(filtering && visibleCount===0){
+    html = `<p style="opacity:.65;padding:30px 0;">لا توجد نتائج مطابقة لبحثك ضمن هذا الفصل الدراسي.</p>`;
   }
   document.getElementById(`semContent-${cid}`).innerHTML = html;
   const note = document.getElementById(`note-${cid}`);
-  if(note) note.textContent = (searchVal || typeVal) ? `عدد النتائج: ${visibleCount}` : "";
+  if(note) note.textContent = filtering ? `عدد النتائج: ${visibleCount}` : "";
   updateProgress(cid);
 }
 
@@ -1042,7 +1254,6 @@ function evidCardHTML(ev, cid){
   const hasFile = isFilled(ev.fileUrl);
   const hasLink = isFilled(ev.linkUrl);
   const attachments = ATTACH_CACHE[ev.id] || [];
-  const dataStr = encodeURIComponent(JSON.stringify(ev));
   const inputId = `up_${ev.id}`;
   const attachRows = attachments.map(a=>`
     <div class="attach-row">
@@ -1051,7 +1262,7 @@ function evidCardHTML(ev, cid){
       <span class="a-size">${formatSize(a.size)}</span>
       <button class="a-btn" title="معاينة" onclick="previewAttachment('${a.fileId}')">👁️</button>
       <button class="a-btn" title="تنزيل" onclick="downloadAttachment('${a.fileId}')">⬇️</button>
-      ${a.fileId.startsWith("idb_") ? `<button class="a-btn" title="حذف" onclick="removeAttachmentAndRefresh('${a.fileId}','${cid}')">🗑️</button>` : `<span class="a-btn" title="مضمّن في الملف">🔒</span>`}
+      ${a.fileId.startsWith("idb_") ? `<button class="a-btn edit-only" title="حذف" onclick="removeAttachmentAndRefresh('${a.fileId}','${cid}')">🗑️</button>` : `<span class="a-btn" title="مضمّن في الملف">🔒</span>`}
     </div>`).join("");
   return `<div class="evid-card">
     <div class="evid-top"><span class="evid-title">${esc(ev.title)}</span><span class="evid-type">${esc(ev.type)}</span></div>
@@ -1059,47 +1270,163 @@ function evidCardHTML(ev, cid){
     <span class="evid-date">📅 ${ev.date ? esc(ev.date) : "لم يُحدَّد التاريخ"}</span>
     ${(!hasFile && !hasLink && attachments.length===0) ? `<div class="evid-empty-msg">⚠️ لم تتم إضافة رابط أو ملف لهذا الشاهد بعد.</div>` : ""}
     ${attachments.length ? `<div class="attach-list">${attachRows}</div>` : ""}
-    <label class="upload-btn" for="${inputId}">📎 إرفاق ملف من الجهاز</label>
-    <input type="file" id="${inputId}" style="display:none" multiple onchange="handleFileUpload('${ev.id}', this, '${cid}')">
-    <span class="storage-note">🔒 الملفات المرفقة تُحفظ على هذا الجهاز فقط</span>
+    <label class="upload-btn edit-only" for="${inputId}">📎 إرفاق ملف من الجهاز</label>
+    <input type="file" id="${inputId}" style="display:none" multiple accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,image/*,video/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" onchange="handleFileUpload('${ev.id}', this, '${cid}')">
+    <span class="storage-note edit-only">🔒 الملفات المرفقة تُحفظ على هذا الجهاز فقط</span>
     <div class="evid-actions">
-      <button class="evid-btn" onclick='openEvidModal(decodeURIComponent("${dataStr}"))'>👁️ عرض البيانات</button>
-      ${hasFile ? `<a class="evid-btn" href="${esc(ev.fileUrl)}" target="_blank" rel="noopener noreferrer">🔗 ملف مُدرج مسبقًا</a>` : ""}
+      <button class="evid-btn edit-only" onclick="openEvidenceForm('${cid}','${ev.id}')">✏️ تعديل البيانات</button>
       ${hasLink ? `<a class="evid-btn" href="${esc(ev.linkUrl)}" target="_blank" rel="noopener noreferrer">🔗 فتح الرابط</a>` : ""}
+      <button class="evid-btn edit-only" onclick="deleteEvidence('${cid}',${activeSemester[cid]||1},'${ev.id}')" style="background:rgba(163,51,51,.1);color:#a33;">🗑️ حذف</button>
     </div>
   </div>`;
 }
 
-function openEvidModal(evJson){
-  const ev = JSON.parse(evJson);
-  const hasFile = isFilled(ev.fileUrl), hasLink = isFilled(ev.linkUrl);
-  const attachments = ATTACH_CACHE[ev.id] || [];
-  let mediaHTML = "";
-  if(hasFile && /\.(png|jpe?g|gif|webp)$/i.test(ev.fileUrl)){
-    mediaHTML = `<img src="${esc(ev.fileUrl)}" alt="${esc(ev.title)}">`;
-  } else if(hasLink && /youtube\.com|youtu\.be/.test(ev.linkUrl)){
-    mediaHTML = `<div style="aspect-ratio:16/9;"><iframe src="${esc(ev.linkUrl)}" style="width:100%;height:100%;border:0;border-radius:12px;" allowfullscreen></iframe></div>`;
-  }
-  const attachRows = attachments.map(a=>`
-    <div class="attach-row">
-      <span class="a-icon">${fileIcon(a.type)}</span>
-      <span class="a-name">${esc(a.name)}</span>
-      <span class="a-size">${formatSize(a.size)}</span>
-      <button class="a-btn" title="معاينة" onclick="previewAttachment('${a.fileId}')">👁️</button>
-      <button class="a-btn" title="تنزيل" onclick="downloadAttachment('${a.fileId}')">⬇️</button>
-    </div>`).join("");
+/* ==========================================================================
+   تحرير المعايير والمؤشرات والشواهد — إضافة/تعديل/حذف من واجهة الموقع
+   ========================================================================== */
+
+/* ---------- المعيار ---------- */
+function openCriterionForm(mode, cid){
+  const c = cid ? CRITERIA.find(x=>x.id===cid) : null;
   document.getElementById("evidModalContent").innerHTML = `
-    ${mediaHTML}
-    <h3 style="color:var(--maroon);font-family:var(--font-display);margin-bottom:10px;">${esc(ev.title)}</h3>
-    <p style="opacity:.8;margin-bottom:10px;">${esc(ev.desc)}</p>
-    <p style="font-size:.85rem;opacity:.6;margin-bottom:16px;">النوع: ${esc(ev.type)} — التاريخ: ${ev.date?esc(ev.date):"غير محدد"}</p>
-    ${(!hasFile && !hasLink && attachments.length===0) ? `<div class="evid-empty-msg">⚠️ لم يتم رفع ملف أو إضافة رابط لهذا الشاهد بعد.</div>` : ""}
-    ${attachments.length ? `<div class="attach-list attach-modal-list">${attachRows}</div>` : ""}
-    <div class="evid-actions">
-      ${hasFile ? `<a class="evid-btn" href="${esc(ev.fileUrl)}" target="_blank" rel="noopener noreferrer">🔗 فتح الملف المُدرج مسبقًا</a>` : ""}
-      ${hasLink ? `<a class="evid-btn" href="${esc(ev.linkUrl)}" target="_blank" rel="noopener noreferrer">🔗 فتح الرابط الخارجي</a>` : ""}
-    </div>`;
+    <h3 style="color:var(--maroon);font-family:var(--font-display);margin-bottom:16px;">${mode==='add' ? '➕ إضافة معيار جديد' : '✏️ تعديل المعيار'}</h3>
+    <form id="criterionForm" style="display:flex;flex-direction:column;gap:14px;text-align:right;">
+      <div><label style="font-weight:700;font-size:.85rem;">الأيقونة (إيموجي)</label>
+        <input name="icon" value="${c?esc(c.icon):'📌'}" maxlength="4" style="width:100%;padding:9px 12px;border-radius:9px;border:1px solid var(--card-border);font-family:inherit;margin-top:4px;"></div>
+      <div><label style="font-weight:700;font-size:.85rem;">عنوان المعيار</label>
+        <input name="title" value="${c?esc(c.title):''}" required style="width:100%;padding:9px 12px;border-radius:9px;border:1px solid var(--card-border);font-family:inherit;margin-top:4px;"></div>
+      <div><label style="font-weight:700;font-size:.85rem;">وصف مختصر</label>
+        <textarea name="desc" rows="2" style="width:100%;padding:9px 12px;border-radius:9px;border:1px solid var(--card-border);font-family:inherit;margin-top:4px;">${c?esc(c.desc):''}</textarea></div>
+      ${mode==='add' ? `<div><label style="font-weight:700;font-size:.85rem;">المؤشرات <span style="font-weight:400;opacity:.6;">(كل مؤشر في سطر، اختياري ويمكن إضافتها لاحقًا)</span></label>
+        <textarea name="subs" rows="4" placeholder="مثال:&#10;نموذج 1&#10;نموذج 2" style="width:100%;padding:9px 12px;border-radius:9px;border:1px solid var(--card-border);font-family:inherit;margin-top:4px;"></textarea></div>` : ""}
+      <div class="evid-actions">
+        <button type="submit" class="evid-btn" style="background:var(--maroon);color:#fff;flex:2;">💾 حفظ</button>
+        <button type="button" class="evid-btn" onclick="closeModal('evidModal')" style="flex:1;">إلغاء</button>
+      </div>
+    </form>`;
+  document.getElementById("criterionForm").addEventListener("submit", e=>{
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    if(mode==='add'){
+      const newId = "c_"+uid();
+      const subs = linesToArray(fd.get("subs"));
+      const nc = {id:newId, icon:(fd.get("icon")||"📌").trim(), title:(fd.get("title")||"معيار جديد").trim(), desc:(fd.get("desc")||"").trim(), subs, semesters:{1:[],2:[]}};
+      CRITERIA.push(nc);
+      saveCriteriaSnapshot();
+      closeModal("evidModal");
+      refreshAfterCriteriaChange(newId);
+    } else {
+      c.icon = (fd.get("icon")||c.icon).trim();
+      c.title = (fd.get("title")||c.title).trim();
+      c.desc = (fd.get("desc")||"").trim();
+      saveCriteriaSnapshot();
+      closeModal("evidModal");
+      refreshAfterCriteriaChange(cid);
+    }
+  });
   openModal("evidModal");
+}
+
+function deleteCriterion(cid){
+  if(!confirm("سيتم حذف هذا المعيار وكل مؤشراته وشواهده نهائيًا من الملف. الملفات المرفقة المحفوظة سابقًا ستبقى غير مستخدمة. هل تريدين المتابعة؟")) return;
+  const idx = CRITERIA.findIndex(x=>x.id===cid);
+  if(idx>-1) CRITERIA.splice(idx,1);
+  saveCriteriaSnapshot();
+  refreshAfterCriteriaChange("index");
+}
+
+/* ---------- المؤشر ---------- */
+function addIndicator(cid){
+  const c = CRITERIA.find(x=>x.id===cid);
+  const name = prompt("اكتبي اسم المؤشر الجديد:");
+  if(!name || !name.trim()) return;
+  const trimmed = name.trim();
+  if(c.subs.includes(trimmed)){ alert("هذا المؤشر موجود بالفعل ضمن هذا المعيار."); return; }
+  c.subs.push(trimmed);
+  saveCriteriaSnapshot();
+  refreshAfterCriteriaChange(cid);
+}
+
+function renameIndicator(cid, oldName){
+  const c = CRITERIA.find(x=>x.id===cid);
+  const name = prompt("عدّلي اسم المؤشر:", oldName);
+  if(!name || !name.trim() || name.trim()===oldName) return;
+  const trimmed = name.trim();
+  const i = c.subs.indexOf(oldName);
+  if(i>-1) c.subs[i] = trimmed;
+  [1,2].forEach(s=> c.semesters[s].forEach(e=>{ if(e.sub===oldName){ e.sub=trimmed; if(e.title===oldName) e.title=trimmed; } }));
+  saveCriteriaSnapshot();
+  refreshAfterCriteriaChange(cid);
+}
+
+function deleteIndicator(cid, subName){
+  if(!confirm(`سيتم حذف المؤشر "${subName}" وكل الشواهد المرتبطة به في الفصلين الدراسيين. هل تريدين المتابعة؟`)) return;
+  const c = CRITERIA.find(x=>x.id===cid);
+  c.subs = c.subs.filter(s=>s!==subName);
+  [1,2].forEach(s=>{ c.semesters[s] = c.semesters[s].filter(e=>e.sub!==subName); });
+  saveCriteriaSnapshot();
+  refreshAfterCriteriaChange(cid);
+}
+
+/* ---------- الشاهد ---------- */
+function addEvidence(cid, sem, subName){
+  const c = CRITERIA.find(x=>x.id===cid);
+  const newEv = {id:`${cid}_s${sem}_x${uid()}`, sub:subName, title:subName, desc:"", date:"", type:EVID_TYPES[0], fileUrl:"", linkUrl:""};
+  c.semesters[sem].push(newEv);
+  saveCriteriaSnapshot();
+  refreshAfterCriteriaChange(cid);
+  setTimeout(()=>openEvidenceForm(cid, newEv.id), 200);
+}
+
+function openEvidenceForm(cid, evId){
+  const c = CRITERIA.find(x=>x.id===cid);
+  let ev=null, sem=null;
+  [1,2].forEach(s=>{ const found=c.semesters[s].find(e=>e.id===evId); if(found){ ev=found; sem=s; } });
+  if(!ev) return;
+  document.getElementById("evidModalContent").innerHTML = `
+    <h3 style="color:var(--maroon);font-family:var(--font-display);margin-bottom:16px;">✏️ تعديل بيانات الشاهد</h3>
+    <form id="evidenceForm" style="display:flex;flex-direction:column;gap:14px;text-align:right;">
+      <div><label style="font-weight:700;font-size:.85rem;">العنوان</label>
+        <input name="title" value="${esc(ev.title)}" style="width:100%;padding:9px 12px;border-radius:9px;border:1px solid var(--card-border);font-family:inherit;margin-top:4px;"></div>
+      <div><label style="font-weight:700;font-size:.85rem;">الوصف</label>
+        <textarea name="desc" rows="2" style="width:100%;padding:9px 12px;border-radius:9px;border:1px solid var(--card-border);font-family:inherit;margin-top:4px;">${esc(ev.desc)}</textarea></div>
+      <div><label style="font-weight:700;font-size:.85rem;">التاريخ</label>
+        <input name="date" value="${esc(ev.date)}" placeholder="مثال: 1447/2/10" style="width:100%;padding:9px 12px;border-radius:9px;border:1px solid var(--card-border);font-family:inherit;margin-top:4px;"></div>
+      <div><label style="font-weight:700;font-size:.85rem;">النوع</label>
+        <select name="type" style="width:100%;padding:9px 12px;border-radius:9px;border:1px solid var(--card-border);font-family:inherit;margin-top:4px;">
+          ${EVID_TYPES.map(t=>`<option value="${t}" ${t===ev.type?"selected":""}>${t}</option>`).join("")}
+        </select></div>
+      <div><label style="font-weight:700;font-size:.85rem;">رابط خارجي <span style="font-weight:400;opacity:.6;">(اختياري — Google Drive / YouTube ...)</span></label>
+        <input name="linkUrl" value="${esc(ev.linkUrl)}" placeholder="https://..." style="width:100%;padding:9px 12px;border-radius:9px;border:1px solid var(--card-border);font-family:inherit;margin-top:4px;"></div>
+      <div class="evid-actions">
+        <button type="submit" class="evid-btn" style="background:var(--maroon);color:#fff;flex:2;">💾 حفظ</button>
+        <button type="button" class="evid-btn" onclick="closeModal('evidModal')" style="flex:1;">إلغاء</button>
+      </div>
+    </form>`;
+  document.getElementById("evidenceForm").addEventListener("submit", e=>{
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    ev.title = (fd.get("title")||ev.sub).trim();
+    ev.desc = (fd.get("desc")||"").trim();
+    ev.date = (fd.get("date")||"").trim();
+    ev.type = fd.get("type")||ev.type;
+    ev.linkUrl = (fd.get("linkUrl")||"").trim();
+    saveCriteriaSnapshot();
+    closeModal("evidModal");
+    refreshAfterCriteriaChange(cid);
+  });
+  openModal("evidModal");
+}
+
+async function deleteEvidence(cid, sem, evId){
+  if(!confirm("سيتم حذف هذا الشاهد نهائيًا، وأي ملفات مرفقة به محليًا. هل تريدين المتابعة؟")) return;
+  const c = CRITERIA.find(x=>x.id===cid);
+  c.semesters[sem] = c.semesters[sem].filter(e=>e.id!==evId);
+  const atts = (ATTACH_CACHE[evId] || []).slice();
+  for(const a of atts){ if(a.fileId.startsWith("idb_")) await deleteAttachment(a.fileId); }
+  delete ATTACH_CACHE[evId];
+  saveCriteriaSnapshot();
+  refreshAfterCriteriaChange(cid);
 }
 
 function filterEvidence(cid){ renderSemesterContent(cid); }
@@ -1209,7 +1536,25 @@ function maybeShowWelcome(){
 }
 
 /* ============================== نقطة البداية ============================== */
+/* وضع العرض فقط: يُفعَّل بإضافة ?view=1 لنهاية الرابط */
+const VIEW_ONLY = new URLSearchParams(location.search).get("view") === "1";
+function applyViewOnlyMode(){
+  document.body.classList.toggle("view-only", VIEW_ONLY);
+}
+
+function copyViewOnlyLink(){
+  const base = location.href.split("?")[0].split("#")[0];
+  const viewUrl = base + "?view=1";
+  const done = ()=> alert("تم نسخ رابط العرض فقط:\n"+viewUrl+"\n\nأرسلي هذا الرابط للمديرة أو لأي شخص تريدين أن يستعرض الملف فقط دون تعديل.");
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(viewUrl).then(done).catch(()=> prompt("انسخي الرابط يدويًا:", viewUrl));
+  } else { prompt("انسخي الرابط يدويًا:", viewUrl); }
+}
+
 async function init(){
+  applyViewOnlyMode();
+  applyTeacherOverrides();
+  applyCriteriaOverrides();
   applyTeacherData();
   buildNav();
   await loadAllAttachments();
@@ -1218,7 +1563,7 @@ async function init(){
   applyTheme(localStorage.getItem("portfolioTheme") || "light");
   const startId = location.hash.replace("#","") || "home";
   goPage(startId);
-  maybeShowWelcome();
+  if(!VIEW_ONLY) maybeShowWelcome();
   triggerReveal();
 }
 document.addEventListener("DOMContentLoaded", init);
