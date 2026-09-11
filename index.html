@@ -352,8 +352,14 @@ body.view-only .edit-only{display:none !important;}
 body.view-only #viewOnlyBanner{display:block;}
 body.view-only .hero{padding-top:calc(var(--nav-h) + 40px + 34px);}
 </style>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 </head>
 <body>
+<div id="dataLoadingOverlay" style="position:fixed;inset:0;z-index:3000;background:var(--bg-light);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;">
+  <div style="font-size:2.4rem;">🌸</div>
+  <div style="font-family:'Cairo',sans-serif;color:var(--maroon);font-weight:700;">جاري تحميل البيانات...</div>
+</div>
 
 <!-- ============ شريط التنقل العلوي ============ -->
 <nav class="navbar">
@@ -413,7 +419,7 @@ body.view-only .hero{padding-top:calc(var(--nav-h) + 40px + 34px);}
         <span class="page-head eyebrow" style="color:var(--pink-dark);font-weight:700;font-size:.85rem;">نظرة سريعة</span>
         <h2 style="font-family:var(--font-display);color:var(--maroon);font-size:1.9rem;">مكوّنات الملف</h2>
       </div>
-      <button class="toolbar-btn edit-only" onclick="exportWithAttachments()">📦 تصدير الملف مع المرفقات والبيانات</button>
+      <button class="toolbar-btn edit-only" onclick="downloadBackupJSON()">💾 تنزيل نسخة احتياطية</button>
     </div>
     <div class="grid-cards reveal" id="homeIntroCards"></div>
 
@@ -439,7 +445,7 @@ body.view-only .hero{padding-top:calc(var(--nav-h) + 40px + 34px);}
       <a href="#" onclick="goPage('cv');return false;">السيرة الذاتية</a>
       <a href="#" onclick="window.print();return false;">🖨️ طباعة</a>
       <a href="#" onclick="exportSummaryPDF();return false;">📄 تصدير ملخص PDF</a>
-      <a href="#" class="edit-only" onclick="exportWithAttachments();return false;">📦 تصدير الملف مع المرفقات والبيانات</a>
+      <a href="#" class="edit-only" onclick="downloadBackupJSON();return false;">💾 تنزيل نسخة احتياطية</a>
       <a href="#" class="edit-only" onclick="copyViewOnlyLink();return false;">🔗 نسخ رابط عرض فقط (للمديرة)</a>
     </div>
   </div>
@@ -502,8 +508,8 @@ const TEACHER_DEFAULTS = {
   }
 };
 /* TEACHER هو الكائن الفعلي المستخدم في كل الموقع؛ يبدأ بنسخة من القيم
-   الافتراضية أعلاه، ثم تُدمَج عليه أي تعديلات محفوظة (مضمّنة في الملف
-   أو محفوظة في متصفحك) عبر applyTeacherOverrides() عند بدء التشغيل. */
+   الافتراضية أعلاه، ثم تُستبدل قيمه ببيانات قاعدة البيانات (Firestore)
+   عبر loadSiteData() عند بدء التشغيل. */
 const TEACHER = JSON.parse(JSON.stringify(TEACHER_DEFAULTS));
 
 /* الصفحات التمهيدية */
@@ -615,28 +621,10 @@ function freshCriteriaData(){
 
 /* CRITERIA هو المصفوفة الحيّة المستخدمة في كل الموقع؛ تبقى نفس المرجع
    (const) وتُملأ/تُستبدل محتوياتها فقط عبر push/splice حتى لا تنكسر أي
-   دالة تحتفظ بمرجع لها. */
+   دالة تحتفظ بمرجع لها. تُحمَّل قيمها الفعلية من Firestore عبر loadSiteData(). */
 const CRITERIA = [];
 CRITERIA.push(...freshCriteriaData());
 
-const CRITERIA_OVERRIDE_KEY = "portfolioCriteriaOverride";
-function applyCriteriaOverrides(){
-  let snapshot = null;
-  const embTag = document.getElementById("embeddedCriteria");
-  if(embTag){ try{ snapshot = JSON.parse(embTag.textContent); } catch(err){ console.warn("تعذّرت قراءة المعايير المضمّنة:", err); } }
-  try{
-    const local = localStorage.getItem(CRITERIA_OVERRIDE_KEY);
-    if(local) snapshot = JSON.parse(local);
-  } catch(err){ console.warn("تعذّرت قراءة تعديلات المعايير المحفوظة محليًا:", err); }
-  if(snapshot && Array.isArray(snapshot) && snapshot.length){
-    CRITERIA.length = 0;
-    CRITERIA.push(...snapshot);
-  }
-}
-function saveCriteriaSnapshot(){
-  try{ localStorage.setItem(CRITERIA_OVERRIDE_KEY, JSON.stringify(CRITERIA)); }
-  catch(err){ console.warn("تعذّر حفظ تعديلات المعايير:", err); }
-}
 function refreshAfterCriteriaChange(targetId){
   buildNav();
   buildHomeCards();
@@ -645,89 +633,84 @@ function refreshAfterCriteriaChange(targetId){
 }
 
 /* ==========================================================================
-   طبقة إرفاق الملفات (IndexedDB) — تتيح رفع الملفات الفعلية وحفظها
-   داخل متصفح الجهاز مباشرة، دون الحاجة لاستضافة خارجية.
-   ملاحظة مهمة: الملفات المرفقة تُحفظ محليًا في متصفح هذا الجهاز فقط،
-   ولن تظهر لزائرات أخريات للموقع أو عند فتحه من جهاز/متصفح مختلف.
-   لمشاركة الملفات مع آخرين يُفضّل استخدام حقل الرابط (رفع الملف على
-   Google Drive مثلًا ولصق الرابط في linkUrl).
+   الربط بقاعدة البيانات (Firebase Firestore) — يجعل كل تعديل وإضافة
+   مرئيًا فورًا من أي جهاز أو متصفح، بدل الحفظ المحلي فقط. مستند واحد في
+   Firestore يحمل بيانات المعلمة وكل المعايير والمؤشرات والشواهد.
    ========================================================================== */
-const DB_NAME = "portfolioFilesDB";
-const STORE_NAME = "files";
-let dbPromise = null;
-function openDB(){
-  if(dbPromise) return dbPromise;
-  dbPromise = new Promise((resolve,reject)=>{
-    if(!window.indexedDB){ reject(new Error("متصفحك أو إعدادات هذا الجهاز تمنع تخزين الملفات محليًا (IndexedDB غير متاح).")); return; }
-    let req;
-    try{ req = indexedDB.open(DB_NAME, 1); }
-    catch(err){ reject(err); return; }
-    req.onupgradeneeded = e=>{
-      const db = e.target.result;
-      if(!db.objectStoreNames.contains(STORE_NAME)){
-        const store = db.createObjectStore(STORE_NAME, {keyPath:"fileId", autoIncrement:true});
-        store.createIndex("evidId","evidId",{unique:false});
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyDFrQZgqVV1P16iNQxNqDId60Mun_A8S2c",
+  authDomain: "performance-file.firebaseapp.com",
+  projectId: "performance-file",
+  storageBucket: "performance-file.firebasestorage.app",
+  messagingSenderId: "927590434886",
+  appId: "1:927590434886:web:76e488eaf3c53424cc2247"
+};
+firebase.initializeApp(FIREBASE_CONFIG);
+const db = firebase.firestore();
+const SITE_DOC = db.collection("site").doc("main");
+
+const CLOUDINARY_CLOUD = "bck0limu";
+const CLOUDINARY_PRESET = "srultsia";
+
+async function loadSiteData(){
+  try{
+    const snap = await SITE_DOC.get();
+    if(snap.exists){
+      const data = snap.data();
+      if(data.teacher) Object.assign(TEACHER, data.teacher);
+      if(data.criteria && Array.isArray(data.criteria) && data.criteria.length){
+        CRITERIA.length = 0;
+        CRITERIA.push(...data.criteria);
       }
-    };
-    req.onsuccess = e=> resolve(e.target.result);
-    req.onerror = ()=> reject(req.error || new Error("تعذّر فتح قاعدة بيانات الملفات المحلية."));
-    req.onblocked = ()=> reject(new Error("تخزين الملفات محجوب (blocked) — أغلقي أي تبويب آخر مفتوح لنفس الموقع وحاولي مجددًا."));
-  });
-  return dbPromise;
-}
-
-let ATTACH_CACHE = {};  /* evidId -> [{fileId,name,type,size}] لعرض القوائم */
-let ATTACH_INDEX = {};  /* fileId -> السجل الكامل (idb أو embedded) لتنفيذ المعاينة/التنزيل/الحذف */
-
-/* ==========================================================================
-   لوحة «تعديل البيانات» — تتيح تعديل بيانات المعلمة والسيرة الذاتية من
-   داخل الموقع مباشرة (بدون لمس الكود). التعديلات تُحفظ في متصفح الجهاز
-   فوريًا، وتصبح دائمة وتظهر لأي شخص عند استخدام زر «تصدير الملف مع
-   المرفقات والبيانات».
-   ========================================================================== */
-const TEACHER_OVERRIDE_KEY = "portfolioTeacherOverride";
-
-function deepMergeTeacher(base, patch){
-  if(!patch) return base;
-  const out = JSON.parse(JSON.stringify(base));
-  Object.keys(patch).forEach(k=>{
-    if(k==="cv" && patch.cv){
-      out.cv = Object.assign({}, out.cv, patch.cv);
-    } else if(patch[k] !== undefined){
-      out[k] = patch[k];
+    } else {
+      /* أول استخدام: احفظي القيم الافتراضية كنقطة بداية مشتركة للجميع */
+      await saveSiteData();
     }
-  });
-  return out;
-}
-
-function applyTeacherOverrides(){
-  let merged = TEACHER_DEFAULTS;
-  const embTag = document.getElementById("embeddedTeacher");
-  if(embTag){
-    try{ merged = deepMergeTeacher(merged, JSON.parse(embTag.textContent)); }
-    catch(err){ console.warn("تعذّرت قراءة بيانات المعلمة المضمّنة:", err); }
+  } catch(err){
+    console.error("تعذّر تحميل بيانات الموقع من قاعدة البيانات:", err);
+    alert("تعذّر الاتصال بقاعدة البيانات.\nتأكدي من اتصال الإنترنت ثم أعيدي تحميل الصفحة.\nرسالة الخطأ: "+((err&&err.message)||err));
   }
-  try{
-    const local = localStorage.getItem(TEACHER_OVERRIDE_KEY);
-    if(local) merged = deepMergeTeacher(merged, JSON.parse(local));
-  } catch(err){ console.warn("تعذّرت قراءة التعديلات المحفوظة محليًا:", err); }
-  Object.assign(TEACHER, merged);
 }
 
-function saveTeacherOverride(patch){
+async function saveSiteData(){
   try{
-    const existingRaw = localStorage.getItem(TEACHER_OVERRIDE_KEY);
-    const existing = existingRaw ? JSON.parse(existingRaw) : {};
-    const merged = deepMergeTeacher(Object.assign({}, TEACHER_DEFAULTS, existing), patch);
-    localStorage.setItem(TEACHER_OVERRIDE_KEY, JSON.stringify(merged));
-  } catch(err){ console.warn("تعذّر حفظ التعديلات:", err); }
-  Object.assign(TEACHER, deepMergeTeacher(TEACHER, patch));
+    await SITE_DOC.set({ teacher: TEACHER, criteria: CRITERIA, updatedAt: Date.now() });
+  } catch(err){
+    console.error("تعذّر حفظ التعديلات في قاعدة البيانات:", err);
+    alert("تعذّر حفظ هذا التعديل في قاعدة البيانات.\nتأكدي من اتصال الإنترنت وحاولي مرة أخرى.\nرسالة الخطأ: "+((err&&err.message)||err));
+  }
+}
+
+async function uploadToCloudinary(file){
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("upload_preset", CLOUDINARY_PRESET);
+  const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/auto/upload`, { method:"POST", body: fd });
+  if(!res.ok){
+    const errText = await res.text().catch(()=> "");
+    throw new Error(`فشل الرفع (${res.status}): ${errText.slice(0,200)}`);
+  }
+  const data = await res.json();
+  return { name: file.name, type: file.type || "", size: file.size, url: data.secure_url };
+}
+
+function findEvidence(cid, evId){
+  const c = CRITERIA.find(x=>x.id===cid);
+  if(!c) return null;
+  let found=null, sem=null;
+  [1,2].forEach(s=>{ const f=(c.semesters[s]||[]).find(e=>e.id===evId); if(f){ found=f; sem=s; } });
+  return found ? {c, ev:found, sem} : null;
 }
 
 function linesToArray(text){
   return (text||"").split("\n").map(s=>s.trim()).filter(Boolean);
 }
 
+/* ==========================================================================
+   لوحة «تعديل البيانات» — تتيح تعديل بيانات المعلمة والسيرة الذاتية من
+   داخل الموقع مباشرة (بدون لمس الكود). التعديلات تُحفظ في قاعدة البيانات
+   فورًا وتظهر لأي شخص يفتح الموقع من أي جهاز.
+   ========================================================================== */
 function openSettingsPanel(){
   const cv = TEACHER.cv;
   document.getElementById("evidModalContent").innerHTML = `
@@ -765,27 +748,31 @@ function openSettingsPanel(){
           <input name="socialUrl${i}" value="${esc(s.url)}" placeholder="الرابط" style="padding:9px 12px;border-radius:9px;border:1px solid var(--card-border);font-family:inherit;">
         `).join("")}
       </div>
-      <div class="storage-note">🔒 هذه التعديلات تُحفظ في متصفح هذا الجهاز فورًا. لجعلها دائمة وتظهر للجميع، استخدمي «📦 تصدير الملف» بعد الحفظ.</div>
+      <div class="storage-note">☁️ تُحفظ هذه التعديلات مباشرة في قاعدة البيانات وتظهر فورًا لأي شخص يفتح الرابط.</div>
       <div class="evid-actions">
         <button type="submit" class="evid-btn" style="background:var(--maroon);color:#fff;flex:2;">💾 حفظ التعديلات</button>
         <button type="button" class="evid-btn" onclick="closeModal('evidModal')" style="flex:1;">إلغاء</button>
       </div>
     </form>`;
-  document.getElementById("settingsForm").addEventListener("submit", e=>{
+  document.getElementById("settingsForm").addEventListener("submit", async e=>{
     e.preventDefault();
     const fd = new FormData(e.target);
     const social = TEACHER.cv.social.map((s,i)=>({label: fd.get(`socialLabel${i}`)||s.label, url: fd.get(`socialUrl${i}`)||""}));
-    const patch = {
-      name: fd.get("name"), specialization: fd.get("specialization"), subject: fd.get("subject"),
-      school: fd.get("school"), eduAdmin: fd.get("eduAdmin"), year: fd.get("year"), copyrightName: fd.get("name"),
-      cv: {
-        qualification: fd.get("qualification"), experienceYears: fd.get("experienceYears"),
-        courses: linesToArray(fd.get("courses")), licenses: linesToArray(fd.get("licenses")),
-        skills: linesToArray(fd.get("skills")), achievements: linesToArray(fd.get("achievements")),
-        social
-      }
-    };
-    saveTeacherOverride(patch);
+    TEACHER.name = fd.get("name")||TEACHER.name;
+    TEACHER.specialization = fd.get("specialization")||TEACHER.specialization;
+    TEACHER.subject = fd.get("subject")||TEACHER.subject;
+    TEACHER.school = fd.get("school")||TEACHER.school;
+    TEACHER.eduAdmin = fd.get("eduAdmin")||TEACHER.eduAdmin;
+    TEACHER.year = fd.get("year")||TEACHER.year;
+    TEACHER.copyrightName = TEACHER.name;
+    TEACHER.cv.qualification = fd.get("qualification")||"";
+    TEACHER.cv.experienceYears = fd.get("experienceYears")||"";
+    TEACHER.cv.courses = linesToArray(fd.get("courses"));
+    TEACHER.cv.licenses = linesToArray(fd.get("licenses"));
+    TEACHER.cv.skills = linesToArray(fd.get("skills"));
+    TEACHER.cv.achievements = linesToArray(fd.get("achievements"));
+    TEACHER.cv.social = social;
+    await saveSiteData();
     closeModal("evidModal");
     applyTeacherData();
     buildHomeCards();
@@ -796,97 +783,11 @@ function openSettingsPanel(){
   openModal("evidModal");
 }
 
-/* يقرأ الملفات المضمَّنة مسبقًا داخل الملف نفسه (إن وُجدت) — تُضاف عند
-   استخدام زر «تصدير الملف مع المرفقات» وتبقى ظاهرة لأي شخص يفتح الملف،
-   على أي جهاز، دون الحاجة لتخزين المتصفح المحلي. */
-function loadEmbeddedAttachments(){
-  const tag = document.getElementById("embeddedData");
-  if(!tag) return;
-  try{
-    const data = JSON.parse(tag.textContent);
-    Object.entries(data).forEach(([evidId, files])=>{
-      files.forEach((f,i)=>{
-        const fileId = `emb_${evidId}_${i}`;
-        (ATTACH_CACHE[evidId] = ATTACH_CACHE[evidId] || []).push({fileId,name:f.name,type:f.type,size:f.size});
-        ATTACH_INDEX[fileId] = {evidId, name:f.name, type:f.type, size:f.size, source:"embedded", dataUrl:f.dataUrl};
-      });
-    });
-  } catch(err){ console.warn("تعذّرت قراءة المرفقات المضمّنة:", err); }
-}
-
-async function loadAllAttachments(){
-  loadEmbeddedAttachments();
-  try{
-    const db = await openDB();
-    return new Promise(resolve=>{
-      const tx = db.transaction(STORE_NAME,"readonly");
-      const store = tx.objectStore(STORE_NAME);
-      const req = store.openCursor();
-      req.onsuccess = e=>{
-        const cursor = e.target.result;
-        if(cursor){
-          const v = cursor.value;
-          const fileId = "idb_"+v.fileId;
-          (ATTACH_CACHE[v.evidId] = ATTACH_CACHE[v.evidId] || []).push({fileId,name:v.name,type:v.type,size:v.size});
-          ATTACH_INDEX[fileId] = {evidId:v.evidId, name:v.name, type:v.type, size:v.size, source:"idb", idbKey:v.fileId};
-          cursor.continue();
-        } else { resolve(); }
-      };
-      req.onerror = ()=> resolve();
-    });
-  } catch(err){ console.warn("تعذّر الوصول لتخزين الملفات المحلي:", err); }
-}
-
-function addAttachment(evidId, file){
-  return openDB().then(db=> new Promise((resolve,reject)=>{
-    const tx = db.transaction(STORE_NAME,"readwrite");
-    const store = tx.objectStore(STORE_NAME);
-    const record = {evidId, name:file.name, type:file.type, size:file.size, blob:file, addedAt:Date.now()};
-    const req = store.add(record);
-    req.onsuccess = ()=>{
-      const idbKey = req.result;
-      const fileId = "idb_"+idbKey;
-      (ATTACH_CACHE[evidId] = ATTACH_CACHE[evidId] || []).push({fileId,name:file.name,type:file.type,size:file.size});
-      ATTACH_INDEX[fileId] = {evidId, name:file.name, type:file.type, size:file.size, source:"idb", idbKey};
-      resolve(fileId);
-    };
-    req.onerror = ()=> reject(req.error);
-  }));
-}
-
-function deleteAttachment(fileId){
-  const rec = ATTACH_INDEX[fileId];
-  if(!rec || rec.source!=="idb") return Promise.resolve();
-  return openDB().then(db=> new Promise((resolve,reject)=>{
-    const tx = db.transaction(STORE_NAME,"readwrite");
-    tx.objectStore(STORE_NAME).delete(rec.idbKey);
-    tx.oncomplete = ()=>{
-      if(ATTACH_CACHE[rec.evidId]) ATTACH_CACHE[rec.evidId] = ATTACH_CACHE[rec.evidId].filter(f=>f.fileId!==fileId);
-      delete ATTACH_INDEX[fileId];
-      resolve();
-    };
-    tx.onerror = ()=> reject(tx.error);
-  }));
-}
-
-function getIdbBlob(idbKey){
-  return openDB().then(db=> new Promise((resolve,reject)=>{
-    const tx = db.transaction(STORE_NAME,"readonly");
-    const req = tx.objectStore(STORE_NAME).get(idbKey);
-    req.onsuccess = ()=> resolve(req.result ? req.result.blob : null);
-    req.onerror = ()=> reject(req.error);
-  }));
-}
-
-/* يعيد رابطًا صالحًا للعرض/التنزيل بغضّ النظر عن مصدر الملف */
-async function getAttachmentUrl(fileId){
-  const rec = ATTACH_INDEX[fileId];
-  if(!rec) return null;
-  if(rec.source==="embedded") return rec.dataUrl;
-  const blob = await getIdbBlob(rec.idbKey);
-  return blob ? URL.createObjectURL(blob) : null;
-}
-
+/* ==========================================================================
+   رفع الملفات المرفقة عبر Cloudinary — الملف يصبح متاحًا برابط دائم يظهر
+   فورًا لأي شخص يفتح الموقع من أي جهاز، لأن الرابط يُحفظ مباشرة ضمن
+   بيانات الشاهد في قاعدة البيانات (Firestore)، وليس في هذا المتصفح فقط.
+   ========================================================================== */
 function formatSize(bytes){
   if(!bytes) return "";
   if(bytes < 1024) return bytes+" B";
@@ -894,130 +795,77 @@ function formatSize(bytes){
   return (bytes/(1024*1024)).toFixed(1)+" MB";
 }
 function fileIcon(type){
-  if(type.includes("pdf")) return "📕";
-  if(type.includes("word") || type.includes("msword") || type.includes("officedocument.wordprocessing")) return "📘";
-  if(type.includes("presentation") || type.includes("powerpoint")) return "📙";
-  if(type.includes("sheet") || type.includes("excel") || type.includes("csv")) return "📊";
-  if(type.startsWith("image/")) return "🖼️";
-  if(type.startsWith("video/")) return "🎬";
-  return "📎";
+  type = type || "";
+  if(type.includes("pdf")) return "\ud83d\udcd5";
+  if(type.includes("word") || type.includes("msword") || type.includes("officedocument.wordprocessing")) return "\ud83d\udcd8";
+  if(type.includes("presentation") || type.includes("powerpoint")) return "\ud83d\udcd9";
+  if(type.includes("sheet") || type.includes("excel") || type.includes("csv")) return "\ud83d\udcca";
+  if(type.startsWith("image/")) return "\ud83d\uddbc\ufe0f";
+  if(type.startsWith("video/")) return "\ud83c\udfac";
+  return "\ud83d\udcce";
 }
 
-async function handleFileUpload(evidId, inputEl, cid){
+async function handleFileUpload(evId, inputEl, cid){
+  const info = findEvidence(cid, evId);
+  if(!info){ inputEl.value=""; return; }
+  const { ev } = info;
+  if(!ev.files) ev.files = [];
   const files = Array.from(inputEl.files || []);
   let successCount = 0;
   for(const f of files){
     try{
-      await addAttachment(evidId, f);
+      const rec = await uploadToCloudinary(f);
+      ev.files.push(rec);
       successCount++;
     } catch(err){
-      console.error("فشل رفع الملف:", f.name, err);
-      alert(`تعذّر رفع الملف "${f.name}".\nرسالة الخطأ: ${(err && (err.message || err.name)) || err}\n\nقد يكون المتصفح يمنع حفظ الملفات محليًا على هذا الجهاز (سياسة إدارية أو إعدادات خصوصية). جرّبي متصفحًا آخر أو أرسلي رسالة الخطأ هذه.`);
+      console.error("\u0641\u0634\u0644 \u0631\u0641\u0639 \u0627\u0644\u0645\u0644\u0641:", f.name, err);
+      alert(`\u062a\u0639\u0630\u0651\u0631 \u0631\u0641\u0639 \u0627\u0644\u0645\u0644\u0641 "${f.name}".\n\u0631\u0633\u0627\u0644\u0629 \u0627\u0644\u062e\u0637\u0623: ${(err && err.message) || err}\n\n\u062a\u0623\u0643\u062f\u064a \u0645\u0646 \u0627\u062a\u0635\u0627\u0644 \u0627\u0644\u0625\u0646\u062a\u0631\u0646\u062a\u060c \u0623\u0648 \u062c\u0631\u0651\u0628\u064a \u0645\u0631\u0629 \u0623\u062e\u0631\u0649.`);
     }
   }
   inputEl.value = "";
-  if(successCount>0){ renderSemesterContent(cid); buildHomeCards(); }
+  if(successCount>0){
+    await saveSiteData();
+    renderSemesterContent(cid);
+    buildHomeCards();
+  }
 }
 
-async function downloadAttachment(fileId){
-  const rec = ATTACH_INDEX[fileId];
-  if(!rec) return;
-  const url = await getAttachmentUrl(fileId);
-  if(!url) return;
-  const a = document.createElement("a");
-  a.href = url; a.download = rec.name;
-  document.body.appendChild(a); a.click(); a.remove();
-  if(rec.source==="idb") setTimeout(()=>URL.revokeObjectURL(url), 4000);
-}
-
-async function previewAttachment(fileId){
-  const rec = ATTACH_INDEX[fileId];
-  if(!rec) return;
-  const url = await getAttachmentUrl(fileId);
-  if(!url) return;
-  let html = `<h3 style="color:var(--maroon);font-family:var(--font-display);margin-bottom:14px;">${esc(rec.name)}</h3>`;
-  if(rec.type.startsWith("image/")) html += `<img src="${url}" alt="${esc(rec.name)}">`;
-  else if(rec.type==="application/pdf") html += `<iframe src="${url}" style="width:100%;height:60vh;border:0;border-radius:12px;"></iframe>`;
-  else if(rec.type.startsWith("video/")) html += `<video src="${url}" controls style="width:100%;border-radius:12px;"></video>`;
-  else html += `<p style="opacity:.75;">لا تتوفر معاينة مباشرة لهذا النوع من الملفات. استخدمي زر التنزيل لفتحه.</p>`;
-  html += `<div class="evid-actions" style="margin-top:16px;"><a class="evid-btn" href="${url}" download="${esc(rec.name)}">⬇️ تنزيل الملف</a></div>`;
+function previewFile(url, type, name){
+  type = type || "";
+  let html = `<h3 style="color:var(--maroon);font-family:var(--font-display);margin-bottom:14px;">${esc(name)}</h3>`;
+  if(type.startsWith("image/")) html += `<img src="${esc(url)}" alt="${esc(name)}">`;
+  else if(type==="application/pdf") html += `<iframe src="${esc(url)}" style="width:100%;height:60vh;border:0;border-radius:12px;"></iframe>`;
+  else if(type.startsWith("video/")) html += `<video src="${esc(url)}" controls style="width:100%;border-radius:12px;"></video>`;
+  else html += `<p style="opacity:.75;">\u0644\u0627 \u062a\u062a\u0648\u0641\u0631 \u0645\u0639\u0627\u064a\u0646\u0629 \u0645\u0628\u0627\u0634\u0631\u0629 \u0644\u0647\u0630\u0627 \u0627\u0644\u0646\u0648\u0639 \u0645\u0646 \u0627\u0644\u0645\u0644\u0641\u0627\u062a. \u0627\u0633\u062a\u062e\u062f\u0645\u064a \u0632\u0631 \u0627\u0644\u0641\u062a\u062d \u0644\u062a\u0646\u0632\u064a\u0644\u0647 \u0623\u0648 \u0639\u0631\u0636\u0647.</p>`;
+  html += `<div class="evid-actions" style="margin-top:16px;"><a class="evid-btn" href="${esc(url)}" target="_blank" rel="noopener noreferrer">\u2197\ufe0f \u0641\u062a\u062d/\u062a\u0646\u0632\u064a\u0644 \u0627\u0644\u0645\u0644\u0641</a></div>`;
   document.getElementById("evidModalContent").innerHTML = html;
   openModal("evidModal");
 }
 
-async function removeAttachmentAndRefresh(fileId, cid){
-  if(!confirm("هل تريدين حذف هذا الملف المرفق؟")) return;
-  await deleteAttachment(fileId);
+async function deleteFileFromEvidence(cid, evId, fileIdx){
+  if(!confirm("\u0647\u0644 \u062a\u0631\u064a\u062f\u064a\u0646 \u062d\u0630\u0641 \u0647\u0630\u0627 \u0627\u0644\u0645\u0644\u0641 \u0645\u0646 \u0627\u0644\u0634\u0627\u0647\u062f\u061f")) return;
+  const info = findEvidence(cid, evId);
+  if(!info || !info.ev.files) return;
+  info.ev.files.splice(fileIdx, 1);
+  await saveSiteData();
   renderSemesterContent(cid);
   buildHomeCards();
 }
 
-/* ==========================================================================
-   تصدير نسخة كاملة من الملف مع تضمين كل المرفقات داخل الكود مباشرة
-   (Base64) — الناتج ملف index.html واحد قابل للإرسال أو النشر، تظهر فيه
-   الشواهد المرفقة لأي شخص يفتحه، على أي جهاز، دون الحاجة لهذا المتصفح.
-   ========================================================================== */
-function blobToDataUrl(blob){
-  return new Promise((resolve,reject)=>{
-    const reader = new FileReader();
-    reader.onload = ()=> resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
-
-async function exportWithAttachments(){
-  const evidIds = Object.keys(ATTACH_CACHE).filter(k=>ATTACH_CACHE[k].length>0);
-
-  const embedded = {};
-  let totalBytes = 0;
-  for(const evidId of evidIds){
-    embedded[evidId] = [];
-    for(const item of ATTACH_CACHE[evidId]){
-      const rec = ATTACH_INDEX[item.fileId];
-      totalBytes += rec.size || 0;
-      let dataUrl;
-      if(rec.source==="embedded"){ dataUrl = rec.dataUrl; }
-      else { const blob = await getIdbBlob(rec.idbKey); dataUrl = await blobToDataUrl(blob); }
-      embedded[evidId].push({name:rec.name, type:rec.type, size:rec.size, dataUrl});
-    }
-  }
-
-  if(totalBytes > 18*1024*1024){
-    const proceed = confirm(`حجم الملفات المرفقة كبير نسبيًا (${formatSize(totalBytes)}) وقد يصعب إرساله بالبريد أو واتساب. يُفضّل في هذه الحالة نشر الملف الناتج مباشرة على GitHub Pages بدل إرساله كمرفق. هل تريدين المتابعة؟`);
-    if(!proceed) return;
-  }
-
-  let sourceHtml;
-  try{
-    const res = await fetch(location.href, {cache:"no-store"});
-    if(!res.ok) throw new Error("fetch failed");
-    sourceHtml = await res.text();
-  } catch(err){
-    sourceHtml = "<!DOCTYPE html>\n" + document.documentElement.outerHTML;
-  }
-
-  /* إزالة أي بيانات مضمّنة سابقة لتفادي التكرار عند إعادة التصدير */
-  sourceHtml = sourceHtml.replace(/<script id="embeddedData"[\s\S]*?<\/script>\s*/,"");
-  sourceHtml = sourceHtml.replace(/<script id="embeddedTeacher"[\s\S]*?<\/script>\s*/,"");
-  sourceHtml = sourceHtml.replace(/<script id="embeddedCriteria"[\s\S]*?<\/script>\s*/,"");
-  const embeddedScript = `<script id="embeddedData" type="application/json">${JSON.stringify(embedded)}<\/script>\n`;
-  const teacherScript = `<script id="embeddedTeacher" type="application/json">${JSON.stringify(TEACHER)}<\/script>\n`;
-  const criteriaScript = `<script id="embeddedCriteria" type="application/json">${JSON.stringify(CRITERIA)}<\/script>\n`;
-  sourceHtml = sourceHtml.replace("</body>", embeddedScript + teacherScript + criteriaScript + "</body>");
-
-  const blob = new Blob([sourceHtml], {type:"text/html;charset=utf-8"});
+function downloadBackupJSON(){
+  const backup = { teacher: TEACHER, criteria: CRITERIA, exportedAt: new Date().toISOString() };
+  const blob = new Blob([JSON.stringify(backup, null, 2)], {type:"application/json"});
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url; a.download = "ملف_الأداء_الوظيفي_مع_المرفقات.html";
+  a.href = url; a.download = "\u0646\u0633\u062e\u0629_\u0627\u062d\u062a\u064a\u0627\u0637\u064a\u0629_\u0645\u0644\u0641_\u0627\u0644\u0623\u062f\u0627\u0621_\u0627\u0644\u0648\u0638\u064a\u0641\u064a.json";
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(()=>URL.revokeObjectURL(url), 4000);
 }
 
-/* ============================== أدوات مساعدة عامة ============================== */
+/* ============================== \u0623\u062f\u0648\u0627\u062a \u0645\u0633\u0627\u0639\u062f\u0629 \u0639\u0627\u0645\u0629 ============================== */
 function esc(str){ return (str||"").toString().replace(/[&<>"']/g, s => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[s])); }
-function isFilled(v){ return v && v.trim() !== "" && v !== "[أضيفي الرابط هنا]"; }
-function hasAttachments(evidId){ return (ATTACH_CACHE[evidId] || []).length > 0; }
+function isFilled(v){ return v && v.trim() !== "" && v !== "[\u0623\u0636\u064a\u0641\u064a \u0627\u0644\u0631\u0627\u0628\u0637 \u0647\u0646\u0627]"; }
+function hasAttachments(ev){ return !!(ev && ev.files && ev.files.length > 0); }
 
 /* ============================== تهيئة النصوص من بيانات المعلمة ============================== */
 function applyTeacherData(){
@@ -1088,7 +936,7 @@ function countFilled(c){
   [1,2].forEach(s=>{
     c.subs.forEach(subName=>{
       const items = (c.semesters[s]||[]).filter(e=>e.sub===subName);
-      const covered = items.some(e=>isFilled(e.fileUrl)||isFilled(e.linkUrl)||hasAttachments(e.id));
+      const covered = items.some(e=>isFilled(e.fileUrl)||isFilled(e.linkUrl)||hasAttachments(e));
       if(covered) n++;
     });
   });
@@ -1253,26 +1101,25 @@ function renderSemesterContent(cid){
 function evidCardHTML(ev, cid){
   const hasFile = isFilled(ev.fileUrl);
   const hasLink = isFilled(ev.linkUrl);
-  const attachments = ATTACH_CACHE[ev.id] || [];
+  const files = ev.files || [];
   const inputId = `up_${ev.id}`;
-  const attachRows = attachments.map(a=>`
+  const attachRows = files.map((a,idx)=>`
     <div class="attach-row">
       <span class="a-icon">${fileIcon(a.type)}</span>
       <span class="a-name">${esc(a.name)}</span>
       <span class="a-size">${formatSize(a.size)}</span>
-      <button class="a-btn" title="معاينة" onclick="previewAttachment('${a.fileId}')">👁️</button>
-      <button class="a-btn" title="تنزيل" onclick="downloadAttachment('${a.fileId}')">⬇️</button>
-      ${a.fileId.startsWith("idb_") ? `<button class="a-btn edit-only" title="حذف" onclick="removeAttachmentAndRefresh('${a.fileId}','${cid}')">🗑️</button>` : `<span class="a-btn" title="مضمّن في الملف">🔒</span>`}
+      <button class="a-btn" title="معاينة" onclick='previewFile("${a.url}","${esc(a.type)}","${esc(a.name).replace(/"/g,"&quot;")}")'>👁️</button>
+      <a class="a-btn" title="فتح/تنزيل" href="${esc(a.url)}" target="_blank" rel="noopener noreferrer">⬇️</a>
+      <button class="a-btn edit-only" title="حذف" onclick="deleteFileFromEvidence('${cid}','${ev.id}',${idx})">🗑️</button>
     </div>`).join("");
   return `<div class="evid-card">
     <div class="evid-top"><span class="evid-title">${esc(ev.title)}</span><span class="evid-type">${esc(ev.type)}</span></div>
     <p class="evid-desc">${esc(ev.desc)}</p>
     <span class="evid-date">📅 ${ev.date ? esc(ev.date) : "لم يُحدَّد التاريخ"}</span>
-    ${(!hasFile && !hasLink && attachments.length===0) ? `<div class="evid-empty-msg">⚠️ لم تتم إضافة رابط أو ملف لهذا الشاهد بعد.</div>` : ""}
-    ${attachments.length ? `<div class="attach-list">${attachRows}</div>` : ""}
-    <label class="upload-btn edit-only" for="${inputId}">📎 إرفاق ملف من الجهاز</label>
+    ${(!hasFile && !hasLink && files.length===0) ? `<div class="evid-empty-msg">⚠️ لم تتم إضافة رابط أو ملف لهذا الشاهد بعد.</div>` : ""}
+    ${files.length ? `<div class="attach-list">${attachRows}</div>` : ""}
+    <label class="upload-btn edit-only" for="${inputId}">📎 إرفاق ملف</label>
     <input type="file" id="${inputId}" style="display:none" multiple accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,image/*,video/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" onchange="handleFileUpload('${ev.id}', this, '${cid}')">
-    <span class="storage-note edit-only">🔒 الملفات المرفقة تُحفظ على هذا الجهاز فقط</span>
     <div class="evid-actions">
       <button class="evid-btn edit-only" onclick="openEvidenceForm('${cid}','${ev.id}')">✏️ تعديل البيانات</button>
       ${hasLink ? `<a class="evid-btn" href="${esc(ev.linkUrl)}" target="_blank" rel="noopener noreferrer">🔗 فتح الرابط</a>` : ""}
@@ -1304,7 +1151,7 @@ function openCriterionForm(mode, cid){
         <button type="button" class="evid-btn" onclick="closeModal('evidModal')" style="flex:1;">إلغاء</button>
       </div>
     </form>`;
-  document.getElementById("criterionForm").addEventListener("submit", e=>{
+  document.getElementById("criterionForm").addEventListener("submit", async e=>{
     e.preventDefault();
     const fd = new FormData(e.target);
     if(mode==='add'){
@@ -1312,14 +1159,14 @@ function openCriterionForm(mode, cid){
       const subs = linesToArray(fd.get("subs"));
       const nc = {id:newId, icon:(fd.get("icon")||"📌").trim(), title:(fd.get("title")||"معيار جديد").trim(), desc:(fd.get("desc")||"").trim(), subs, semesters:{1:[],2:[]}};
       CRITERIA.push(nc);
-      saveCriteriaSnapshot();
+      await saveSiteData();
       closeModal("evidModal");
       refreshAfterCriteriaChange(newId);
     } else {
       c.icon = (fd.get("icon")||c.icon).trim();
       c.title = (fd.get("title")||c.title).trim();
       c.desc = (fd.get("desc")||"").trim();
-      saveCriteriaSnapshot();
+      await saveSiteData();
       closeModal("evidModal");
       refreshAfterCriteriaChange(cid);
     }
@@ -1327,27 +1174,27 @@ function openCriterionForm(mode, cid){
   openModal("evidModal");
 }
 
-function deleteCriterion(cid){
-  if(!confirm("سيتم حذف هذا المعيار وكل مؤشراته وشواهده نهائيًا من الملف. الملفات المرفقة المحفوظة سابقًا ستبقى غير مستخدمة. هل تريدين المتابعة؟")) return;
+async function deleteCriterion(cid){
+  if(!confirm("سيتم حذف هذا المعيار وكل مؤشراته وشواهده نهائيًا من قاعدة البيانات. هل تريدين المتابعة؟")) return;
   const idx = CRITERIA.findIndex(x=>x.id===cid);
   if(idx>-1) CRITERIA.splice(idx,1);
-  saveCriteriaSnapshot();
+  await saveSiteData();
   refreshAfterCriteriaChange("index");
 }
 
 /* ---------- المؤشر ---------- */
-function addIndicator(cid){
+async function addIndicator(cid){
   const c = CRITERIA.find(x=>x.id===cid);
   const name = prompt("اكتبي اسم المؤشر الجديد:");
   if(!name || !name.trim()) return;
   const trimmed = name.trim();
   if(c.subs.includes(trimmed)){ alert("هذا المؤشر موجود بالفعل ضمن هذا المعيار."); return; }
   c.subs.push(trimmed);
-  saveCriteriaSnapshot();
+  await saveSiteData();
   refreshAfterCriteriaChange(cid);
 }
 
-function renameIndicator(cid, oldName){
+async function renameIndicator(cid, oldName){
   const c = CRITERIA.find(x=>x.id===cid);
   const name = prompt("عدّلي اسم المؤشر:", oldName);
   if(!name || !name.trim() || name.trim()===oldName) return;
@@ -1355,34 +1202,33 @@ function renameIndicator(cid, oldName){
   const i = c.subs.indexOf(oldName);
   if(i>-1) c.subs[i] = trimmed;
   [1,2].forEach(s=> c.semesters[s].forEach(e=>{ if(e.sub===oldName){ e.sub=trimmed; if(e.title===oldName) e.title=trimmed; } }));
-  saveCriteriaSnapshot();
+  await saveSiteData();
   refreshAfterCriteriaChange(cid);
 }
 
-function deleteIndicator(cid, subName){
+async function deleteIndicator(cid, subName){
   if(!confirm(`سيتم حذف المؤشر "${subName}" وكل الشواهد المرتبطة به في الفصلين الدراسيين. هل تريدين المتابعة؟`)) return;
   const c = CRITERIA.find(x=>x.id===cid);
   c.subs = c.subs.filter(s=>s!==subName);
   [1,2].forEach(s=>{ c.semesters[s] = c.semesters[s].filter(e=>e.sub!==subName); });
-  saveCriteriaSnapshot();
+  await saveSiteData();
   refreshAfterCriteriaChange(cid);
 }
 
 /* ---------- الشاهد ---------- */
-function addEvidence(cid, sem, subName){
+async function addEvidence(cid, sem, subName){
   const c = CRITERIA.find(x=>x.id===cid);
-  const newEv = {id:`${cid}_s${sem}_x${uid()}`, sub:subName, title:subName, desc:"", date:"", type:EVID_TYPES[0], fileUrl:"", linkUrl:""};
+  const newEv = {id:`${cid}_s${sem}_x${uid()}`, sub:subName, title:subName, desc:"", date:"", type:EVID_TYPES[0], fileUrl:"", linkUrl:"", files:[]};
   c.semesters[sem].push(newEv);
-  saveCriteriaSnapshot();
+  await saveSiteData();
   refreshAfterCriteriaChange(cid);
   setTimeout(()=>openEvidenceForm(cid, newEv.id), 200);
 }
 
 function openEvidenceForm(cid, evId){
-  const c = CRITERIA.find(x=>x.id===cid);
-  let ev=null, sem=null;
-  [1,2].forEach(s=>{ const found=c.semesters[s].find(e=>e.id===evId); if(found){ ev=found; sem=s; } });
-  if(!ev) return;
+  const info = findEvidence(cid, evId);
+  if(!info) return;
+  const { ev } = info;
   document.getElementById("evidModalContent").innerHTML = `
     <h3 style="color:var(--maroon);font-family:var(--font-display);margin-bottom:16px;">✏️ تعديل بيانات الشاهد</h3>
     <form id="evidenceForm" style="display:flex;flex-direction:column;gap:14px;text-align:right;">
@@ -1403,7 +1249,7 @@ function openEvidenceForm(cid, evId){
         <button type="button" class="evid-btn" onclick="closeModal('evidModal')" style="flex:1;">إلغاء</button>
       </div>
     </form>`;
-  document.getElementById("evidenceForm").addEventListener("submit", e=>{
+  document.getElementById("evidenceForm").addEventListener("submit", async e=>{
     e.preventDefault();
     const fd = new FormData(e.target);
     ev.title = (fd.get("title")||ev.sub).trim();
@@ -1411,7 +1257,7 @@ function openEvidenceForm(cid, evId){
     ev.date = (fd.get("date")||"").trim();
     ev.type = fd.get("type")||ev.type;
     ev.linkUrl = (fd.get("linkUrl")||"").trim();
-    saveCriteriaSnapshot();
+    await saveSiteData();
     closeModal("evidModal");
     refreshAfterCriteriaChange(cid);
   });
@@ -1419,13 +1265,10 @@ function openEvidenceForm(cid, evId){
 }
 
 async function deleteEvidence(cid, sem, evId){
-  if(!confirm("سيتم حذف هذا الشاهد نهائيًا، وأي ملفات مرفقة به محليًا. هل تريدين المتابعة؟")) return;
+  if(!confirm("سيتم حذف هذا الشاهد نهائيًا من قاعدة البيانات. هل تريدين المتابعة؟")) return;
   const c = CRITERIA.find(x=>x.id===cid);
   c.semesters[sem] = c.semesters[sem].filter(e=>e.id!==evId);
-  const atts = (ATTACH_CACHE[evId] || []).slice();
-  for(const a of atts){ if(a.fileId.startsWith("idb_")) await deleteAttachment(a.fileId); }
-  delete ATTACH_CACHE[evId];
-  saveCriteriaSnapshot();
+  await saveSiteData();
   refreshAfterCriteriaChange(cid);
 }
 
@@ -1553,11 +1396,9 @@ function copyViewOnlyLink(){
 
 async function init(){
   applyViewOnlyMode();
-  applyTeacherOverrides();
-  applyCriteriaOverrides();
+  await loadSiteData();
   applyTeacherData();
   buildNav();
-  await loadAllAttachments();
   buildHomeCards();
   renderStaticPages();
   applyTheme(localStorage.getItem("portfolioTheme") || "light");
@@ -1565,6 +1406,8 @@ async function init(){
   goPage(startId);
   if(!VIEW_ONLY) maybeShowWelcome();
   triggerReveal();
+  const loader = document.getElementById("dataLoadingOverlay");
+  if(loader) loader.remove();
 }
 document.addEventListener("DOMContentLoaded", init);
 </script>
