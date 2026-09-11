@@ -400,7 +400,7 @@ body.view-only .hero{padding-top:calc(var(--nav-h) + 40px + 34px);}
       <rect width="400" height="400" fill="url(#rosette)"/>
     </svg>
     <div class="hero-inner">
-      <span class="hero-eyebrow">📘 العام الدراسي 1447هـ</span>
+      <span class="hero-eyebrow" id="heroYearBadge">📘 العام الدراسي 1447هـ</span>
       <h1>ملف الأداء الوظيفي للمعلمة</h1>
       <div class="teacher-name" id="heroTeacherName">[اسم المعلمة]</div>
       <div class="teacher-meta">
@@ -873,6 +873,7 @@ function applyTeacherData(){
   document.getElementById("heroSpec").textContent = TEACHER.specialization;
   document.getElementById("heroSchool").textContent = TEACHER.school;
   document.getElementById("heroAdmin").textContent = TEACHER.eduAdmin;
+  document.getElementById("heroYearBadge").textContent = `📘 العام الدراسي ${TEACHER.year}`;
   document.getElementById("footerCopy").textContent = `جميع الحقوق محفوظة © ${TEACHER.year} — المعلمة / ${TEACHER.copyrightName}`;
   document.title = `ملف الأداء الوظيفي — ${TEACHER.name}`;
 }
